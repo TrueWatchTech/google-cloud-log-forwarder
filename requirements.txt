@@ -1,0 +1,4 @@
+# Intentionally empty: the forwarder uses the Python 3.12 standard library only
+# (http.server, http.client, json, base64, calendar, ipaddress, urllib.parse).
+# There is no third-party package to install, and therefore no dependency lock to pin
+# beyond the base-image digest in the Dockerfile.

@@ -1,0 +1,17 @@
+# Local environment and credential files. env.yaml is tracked: it holds placeholders only.
+.env
+.env.*
+*.local.yaml
+*.local.yml
+*.pem
+*.key
+*.p12
+*credentials*.json
+*service-account*.json
+*-key.json
+
+# Python and editor caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
