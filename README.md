@@ -17,6 +17,13 @@ Cloud Logging sink -> Pub/Sub topic -> authenticated push (OIDC) -> Cloud Run (t
   The service acknowledges only after DataKit returns 2xx. Otherwise Pub/Sub retries, so a record can
   arrive twice; `google_insert_id` identifies duplicates.
 - `jsonPayload` and `textPayload` are supported. Audit logs use `protoPayload` and are rejected.
+- `httpRequest`, when present (for example in load balancer request logs), becomes `http_*` fields:
+  `http_method`, `http_url`, `http_status`, `http_request_size`, `http_response_size`,
+  `http_user_agent`, `http_remote_ip`, `http_server_ip`, `http_referer`, `http_protocol`,
+  `http_latency` (original Duration string) and `http_latency_ms`, plus the cache fields.
+- `resource.labels` string values become `resource_<key>` tags, for example
+  `resource_backend_service_name`. Keys outside `[a-z][a-z0-9_]*` are skipped, and a label never
+  overwrites a built-in tag such as `resource_type`.
 - The TrueWatch DataWay token stays in DataKit. Neither this repository nor `env.yaml` holds a
   credential, and the service refuses to start if a credential-shaped variable is set.
 

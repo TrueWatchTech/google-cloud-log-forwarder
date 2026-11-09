@@ -178,7 +178,8 @@ class TestSuccess(HandlerCase):
         self.assertEqual(tags["log_name"], "stdout")
         self.assertEqual(tags["resource_type"], "gce_instance")
         self.assertEqual(tags["project"], PROJECT)
-        self.assertEqual(sorted(tags), ["google_insert_id", "log_name", "project", "resource_type", "severity"])
+        self.assertEqual(sorted(tags), ["google_insert_id", "log_name", "project", "resource_instance_id",
+                                        "resource_type", "severity"])
 
     def test_06_url_encoded_log_name_decoded(self):
         e = logentry(logName="projects/%s/logs/cloudaudit.googleapis.com%%2Factivity" % PROJECT)
