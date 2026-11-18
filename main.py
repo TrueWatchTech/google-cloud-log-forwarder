@@ -25,10 +25,13 @@ Mapping (one LogEntry -> one DataKit record), documented contract:
   fields.status        severity mapped to DataKit's log status vocabulary
   fields.log_timestamp original RFC 3339 timestamp string, unmodified
   fields.receive_timestamp  LogEntry.receiveTimestamp, when present and valid
+  tags.resource_<key>  LogEntry.resource.labels string values (e.g. resource_backend_service_name);
+                       keys outside [a-z][a-z0-9_]* are skipped, built-in tags are never overwritten
+  fields.http_*        LogEntry.httpRequest, when present (see HTTP_REQUEST_FIELDS), plus
+                       http_latency_ms parsed from the latency Duration
 
 google_insert_id is a deliberately high-cardinality tag: it is the identifier the verification step
-filters on. Resource labels are NOT mapped (they differ per resource type); that is a stated
-limitation, not an implied claim of broader support.
+filters on.
 
 ACK: 204 ONLY after DataKit answered 2xx to the actual write. Malformed/foreign input -> 4xx and
 destination failure/timeout/redirect/non-2xx -> 502, so Pub/Sub retries and never sees a false ACK.
@@ -88,6 +91,24 @@ LOG_NAME_RE = re.compile(r"^projects/([a-z][a-z0-9\-]{4,28}[a-z0-9])/logs/([A-Za
 INSERT_ID_RE = re.compile(r"^[\x21-\x7e]{1,256}$")
 RESOURCE_TYPE_RE = re.compile(r"^[a-z][a-z0-9_.\-]{0,62}$")
 RFC3339_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:([Zz])|([+-])(\d{2}):(\d{2}))$")
+
+LABEL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+MAX_LABEL_VALUE = 1024
+LATENCY_RE = re.compile(r"^(\d{1,9})(?:\.(\d{1,9}))?s$")
+
+# LogEntry.httpRequest (HttpRequest message) -> DataKit field name. Request/response sizes are int64
+# and arrive as JSON strings; status is an int; latency is a protobuf Duration string such as "0.0123s".
+HTTP_REQUEST_FIELDS = {"requestMethod": "http_method", "requestUrl": "http_url",
+                       "requestSize": "http_request_size", "status": "http_status",
+                       "responseSize": "http_response_size", "userAgent": "http_user_agent",
+                       "remoteIp": "http_remote_ip", "serverIp": "http_server_ip",
+                       "referer": "http_referer", "latency": "http_latency",
+                       "protocol": "http_protocol", "cacheLookup": "http_cache_lookup",
+                       "cacheHit": "http_cache_hit",
+                       "cacheValidatedWithOriginServer": "http_cache_validated",
+                       "cacheFillBytes": "http_cache_fill_bytes"}
+HTTP_INT_FIELDS = ("requestSize", "status", "responseSize", "cacheFillBytes")
+HTTP_BOOL_FIELDS = ("cacheLookup", "cacheHit", "cacheValidatedWithOriginServer")
 
 SEVERITY_STATUS = {"DEFAULT": "info", "DEBUG": "debug", "INFO": "info", "NOTICE": "notice",
                    "WARNING": "warning", "ERROR": "error", "CRITICAL": "critical",
@@ -258,6 +279,53 @@ def _finite(obj):
             _finite(v)
 
 
+def resource_label_tags(resource):
+    """resource.labels -> tags named resource_<key>. Keys outside LABEL_KEY_RE are skipped."""
+    labels = resource.get("labels") if isinstance(resource, dict) else None
+    if labels is None:
+        return {}
+    if not isinstance(labels, dict):
+        raise Reject(400, "LogEntry resource.labels is malformed")
+    tags = {}
+    for key, value in labels.items():
+        if isinstance(value, str) and LABEL_KEY_RE.match(key) and len(value) <= MAX_LABEL_VALUE:
+            tags["resource_" + key] = value
+    return tags
+
+
+def http_request_fields(http_request):
+    """LogEntry.httpRequest -> http_* fields, plus http_latency_ms parsed from the Duration string."""
+    if http_request is None:
+        return {}
+    if not isinstance(http_request, dict):
+        raise Reject(400, "LogEntry httpRequest is malformed")
+    fields = {}
+    for key, name in HTTP_REQUEST_FIELDS.items():
+        value = http_request.get(key)
+        if value is None:
+            continue
+        if key in HTTP_INT_FIELDS:
+            if isinstance(value, bool) or not isinstance(value, (int, str)) \
+                    or not re.match(r"^[0-9]{1,19}$", str(value)):
+                raise Reject(400, "LogEntry httpRequest.%s is not an integer" % key)
+            fields[name] = int(value)
+        elif key in HTTP_BOOL_FIELDS:
+            if not isinstance(value, bool):
+                raise Reject(400, "LogEntry httpRequest.%s is not a boolean" % key)
+            fields[name] = value
+        elif isinstance(value, str):
+            fields[name] = value
+        else:
+            raise Reject(400, "LogEntry httpRequest.%s is not a string" % key)
+    if "http_latency" in fields:
+        m = LATENCY_RE.match(fields["http_latency"])
+        if not m:
+            raise Reject(400, "LogEntry httpRequest.latency is not a Duration")
+        nanos = int(m.group(1)) * 1_000_000_000 + int((m.group(2) or "").ljust(9, "0"))
+        fields["http_latency_ms"] = nanos / 1_000_000
+    return fields
+
+
 def record_from_logentry(cfg, entry):
     """Validate one ordinary LogEntry and map it to one DataKit record."""
     insert_id = entry.get("insertId")
@@ -306,6 +374,9 @@ def record_from_logentry(cfg, entry):
     if isinstance(entry.get("receiveTimestamp"), str):
         rfc3339_ns(entry["receiveTimestamp"], "receiveTimestamp")
         fields["receive_timestamp"] = entry["receiveTimestamp"]
+    for key, value in resource_label_tags(resource).items():
+        tags.setdefault(key, value)
+    fields.update(http_request_fields(entry.get("httpRequest")))
 
     record = {"measurement": cfg["measurement"], "time": t_ns, "tags": tags, "fields": fields}
     if len(json.dumps([record], separators=(",", ":"), ensure_ascii=False, allow_nan=False)
