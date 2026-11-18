@@ -1,0 +1,4 @@
+# Keep the uploaded build context to the two files the image needs.
+*
+!main.py
+!Dockerfile

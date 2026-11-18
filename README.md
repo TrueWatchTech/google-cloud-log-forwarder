@@ -27,6 +27,12 @@ Cloud Logging sink -> Pub/Sub topic -> authenticated push (OIDC) -> Cloud Run (t
 - The TrueWatch DataWay token stays in DataKit. Neither this repository nor `env.yaml` holds a
   credential, and the service refuses to start if a credential-shaped variable is set.
 
+## DataWay edition
+
+[`dataway/`](dataway/) holds a variant that sends straight to TrueWatch DataWay over HTTPS, with no
+DataKit. It batches concurrent Pub/Sub pushes into one write and reads a Client Token (write-only,
+logs and RUM) from Secret Manager. See [dataway/README.md](dataway/README.md).
+
 ## Get the code
 
 ```bash

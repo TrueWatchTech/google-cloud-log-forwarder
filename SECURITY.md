@@ -13,4 +13,7 @@ private way to share the report.
   and subscription checks in the service filter foreign messages but do not authenticate callers.
 - Keep the DataWay URL and token in DataKit. Never add them to `env.yaml`, environment variables or
   this repository.
+- The DataWay edition in `dataway/` has no DataKit, so it reads a Client Token from Secret Manager
+  (`--set-secrets`) and refuses a workspace token. Never put that token in `env.yaml` or this
+  repository either.
 - Keep DataKit's listener private: allow TCP 9529 only from the Cloud Run subnet.
